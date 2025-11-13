@@ -1,0 +1,2 @@
+pygame-ce>=2.5.0
+miniKanren>=1.0.3
