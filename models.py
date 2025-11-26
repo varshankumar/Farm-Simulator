@@ -38,15 +38,16 @@ class CropInfo:
     growth_stages: int  # Days to mature
     seed_cost: int
     harvest_value: int
+    time_per_stage: float
     unlocked: bool = True
 
 
 # Crop database
 CROP_DATABASE: Dict[CropType, CropInfo] = {
-    CropType.WHEAT: CropInfo("Wheat", 3, 5, 15, True),
-    CropType.CARROT: CropInfo("Carrot", 4, 10, 25, False),  # Unlockable
-    CropType.TOMATO: CropInfo("Tomato", 5, 15, 40, False),  # Unlockable
-    CropType.CORN: CropInfo("Corn", 6, 20, 60, False),      # Unlockable
+    CropType.WHEAT: CropInfo("Wheat", 3, 5, 15, 30.0, True),
+    CropType.CARROT: CropInfo("Carrot", 4, 10, 25, 60.0, False),  # Unlockable
+    CropType.TOMATO: CropInfo("Tomato", 5, 15, 40, 80.0, False),  # Unlockable
+    CropType.CORN: CropInfo("Corn", 6, 20, 60, 100.0, False),      # Unlockable
 }
 
 

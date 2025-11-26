@@ -63,6 +63,7 @@ def serialize_game_state(state: GameState) -> Dict[str, Any]:
         'stats': stats_data,
         'current_day': state.current_day,
         'selected_crop': state.selected_crop.name,
+        'selected_tool': state.selected_tool.name,
         'farm_size': state.farm_size,
         'unlocked_area': state.unlocked_area
     }
@@ -71,63 +72,112 @@ def serialize_game_state(state: GameState) -> Dict[str, Any]:
 def deserialize_game_state(data: Dict[str, Any]) -> GameState:
     """
     Restore game state from JSON data.
-    
+
     Args:
         data: Dictionary loaded from JSON
-    
+
     Returns:
         Restored game state
     """
-    from dataclasses import replace
-    
-    # Restore farm
-    farm = {}
-    for key, plot_data in data['farm'].items():
+    # ---------- Restore farm ----------
+    farm: Dict[tuple[int, int], Plot] = {}
+    farm_data = data.get('farm', {})
+
+    for key, plot_data in farm_data.items():
         x, y = map(int, key.split(','))
-        
+
         crop = None
-        if plot_data['crop']:
-            crop_data = plot_data['crop']
-            crop = Crop(
-                crop_type=CropType[crop_data['crop_type']],
-                growth_stage=crop_data['growth_stage'],
-                watered=crop_data['watered'],
-                days_since_plant=crop_data['days_since_plant']
-            )
-        
+        crop_raw = plot_data.get('crop')
+        if crop_raw:
+            try:
+                crop_type = CropType[crop_raw['crop_type']]
+            except KeyError:
+                # Unknown crop type in save – skip this crop
+                crop_type = None
+
+            if crop_type is not None:
+                crop = Crop(
+                    crop_type=crop_type,
+                    growth_stage=crop_raw.get('growth_stage', 0),
+                    watered=crop_raw.get('watered', False),
+                    days_since_plant=crop_raw.get('days_since_plant', 0)
+                )
+
         plot = Plot(
             x=x,
             y=y,
             crop=crop,
-            unlocked=plot_data['unlocked']
+            unlocked=plot_data.get('unlocked', True)
         )
         farm[(x, y)] = plot
-    
-    # Restore inventory
-    inv_data = data['inventory']
-    seeds = {CropType[name]: count for name, count in inv_data['seeds'].items()}
-    inventory = Inventory(coins=inv_data['coins'], seeds=seeds)
-    
-    # Restore stats
-    stats_data = data['stats']
-    crops_harvested = {CropType[name]: count for name, count in stats_data['crops_harvested'].items()}
+
+    # ---------- Restore inventory ----------
+    inv_data = data.get('inventory', {})
+    raw_seeds = inv_data.get('seeds', {})
+
+    seeds: Dict[CropType, int] = {}
+    for name, count in raw_seeds.items():
+        try:
+            ct = CropType[name]
+            seeds[ct] = count
+        except KeyError:
+            # Ignore unknown crop names
+            continue
+
+    inventory = Inventory(
+        coins=inv_data.get('coins', 0),
+        seeds=seeds
+    )
+
+    # ---------- Restore stats ----------
+    stats_data = data.get('stats', {})
+    raw_crops_harvested = stats_data.get('crops_harvested', {})
+
+    crops_harvested: Dict[CropType, int] = {}
+    for name, count in raw_crops_harvested.items():
+        try:
+            ct = CropType[name]
+            crops_harvested[ct] = count
+        except KeyError:
+            continue
+
     stats = PlayerStats(
-        total_harvests=stats_data['total_harvests'],
-        total_coins_earned=stats_data['total_coins_earned'],
-        days_played=stats_data['days_played'],
+        total_harvests=stats_data.get('total_harvests', 0),
+        total_coins_earned=stats_data.get('total_coins_earned', 0),
+        days_played=stats_data.get('days_played', 0),
         crops_harvested=crops_harvested
     )
-    
+
+    # ---------- Restore selected crop/tool & other fields ----------
+    # Selected crop
+    selected_crop_name = data.get('selected_crop', 'WHEAT')
+    try:
+        selected_crop = CropType[selected_crop_name]
+    except KeyError:
+        selected_crop = CropType.WHEAT
+
+    # Selected tool – if you later add it to serialize_game_state
+    selected_tool_name = data.get('selected_tool', 'PLANT')
+    try:
+        selected_tool = Tool[selected_tool_name]
+    except KeyError:
+        selected_tool = Tool.PLANT
+
+    current_day = data.get('current_day', 1)
+    farm_size = data.get('farm_size', 10)
+    unlocked_area = data.get('unlocked_area', 5)
+
     return GameState(
         farm=farm,
         inventory=inventory,
         stats=stats,
-        current_day=data['current_day'],
-        selected_crop=CropType[data['selected_crop']],
-        selected_tool=Tool.PLANT,  # Default tool
-        farm_size=data['farm_size'],
-        unlocked_area=data['unlocked_area']
+        current_day=current_day,
+        selected_crop=selected_crop,
+        selected_tool=selected_tool,
+        farm_size=farm_size,
+        unlocked_area=unlocked_area
     )
+
 
 
 def save_game(state: GameState, filename: str = SAVE_FILE) -> bool:

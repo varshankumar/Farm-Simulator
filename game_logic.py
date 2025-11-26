@@ -222,6 +222,82 @@ def toggle_crop_selection(state: GameState) -> GameState:
     
     return replace(state, selected_crop=available_crops[next_idx])
 
+def natural_growth_tick(state: GameState) -> GameState:
+    """
+    Like a mini advance_day: increase days_since_plant for watered crops
+    without changing current_day or stats.
+    """
+    from dataclasses import replace
+    new_farm = {}
+    for pos, plot in state.farm.items():
+        if plot.crop is None:
+            new_farm[pos] = plot
+        else:
+            crop = plot.crop
+            if crop.watered:
+                new_crop = replace(
+                    crop,
+                    days_since_plant=crop.days_since_plant + 1,
+                    watered=False
+                )
+            else:
+                new_crop = replace(crop, watered=False)
+            new_farm[pos] = replace(plot, crop=new_crop)
+    return replace(state, farm=new_farm)
+
+from dataclasses import replace
+from typing import Dict, Tuple
+from models import GameState, CROP_DATABASE, CropType, Plot, Crop
+
+def realtime_growth_step(state: GameState,
+                         timers: Dict[Tuple[int, int], float],
+                         delta_seconds: float) -> GameState:
+    """
+    Advance crop growth based on real time, with per-crop time_per_stage.
+    - Only watered crops accumulate time.
+    - When accumulated time >= time_per_stage, we increment days_since_plant by 1
+      and reset watered to False (so player must water again for next stage).
+    """
+    new_farm = {}
+
+    for pos, plot in state.farm.items():
+        crop = plot.crop
+
+        # No crop: clear any timer and continue
+        if crop is None:
+            timers.pop(pos, None)
+            new_farm[pos] = plot
+            continue
+
+        # Only grow if the crop is watered
+        if not crop.watered:
+            # No growth; keep plot / crop as-is
+            new_farm[pos] = plot
+            continue
+
+        crop_info = CROP_DATABASE[crop.crop_type]
+
+        # Accumulate time for this plot
+        current_acc = timers.get(pos, 0.0) + delta_seconds
+
+        # While we've accumulated enough time for at least one stage, grow
+        # (loop allows catching up if delta_seconds is large)
+        grown_crop = crop
+        while current_acc >= crop_info.time_per_stage and not grown_crop.is_mature():
+            current_acc -= crop_info.time_per_stage
+            grown_crop = replace(
+                grown_crop,
+                days_since_plant=grown_crop.days_since_plant + 1,
+                watered=False,  # must water again for the next stage
+            )
+
+        timers[pos] = current_acc
+        new_farm[pos] = replace(plot, crop=grown_crop)
+    
+
+    return replace(state, farm=new_farm)
+
+
 
 def get_plot_status(plot: Plot) -> str:
     """

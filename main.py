@@ -4,15 +4,16 @@ Integrates all systems: rendering, input, game logic, and paradigms.
 """
 import pygame
 import sys
+import asyncio
 from models import GameState, Tool, CropType
 from game_logic import (
     plant_seed, water_crop, harvest_crop, advance_day, 
-    buy_seeds, toggle_crop_selection
+    buy_seeds, toggle_crop_selection, natural_growth_tick
 )
 from renderer import Renderer
 from save_system import save_game, load_game, save_exists
 from logic_system import update_unlocks, get_next_unlocks
-from concurrency_system import apply_rain_effect
+from concurrency_system import CropGrowthManager, WeatherSystem, apply_rain_effect
 
 
 class FarmSimulator:
@@ -24,6 +25,10 @@ class FarmSimulator:
         self.clock = pygame.time.Clock()
         self.running = True
         self.in_shop = False
+        self.g_manager = CropGrowthManager(self.growth_event)
+        self.w_manager = WeatherSystem(self.weather_event)
+        self.last_growth_time = pygame.time.get_ticks()   
+        self.plot_growth_timers = {}
         
         # Load or create game state
         if save_exists():
@@ -131,15 +136,41 @@ class FarmSimulator:
         self.renderer.show_message(msg)
     
     def update(self):
-        """Update game state"""
-        # Handle shop
+    # ----- SHOP HANDLING -----
         if self.in_shop:
+        # Draw shop and maybe get a crop to buy
             crop_to_buy = self.renderer.render_shop(self.state)
+
+        # If player clicked on a crop button: buy 1 seed, but stay in shop
             if crop_to_buy:
                 self.state, msg = buy_seeds(self.state, crop_to_buy, 1)
                 self.renderer.show_message(msg)
-        
-        # Check for harvest key (H) - only when hovering over a plot
+            # ❌ do NOT close shop here
+            # self.in_shop = False
+
+        # Allow ESC to close the shop reliably
+            keys = pygame.key.get_pressed()
+            if keys[pygame.K_ESCAPE]:
+                self.in_shop = False
+                return  # go back to main game next frame
+
+        # While shop is open, skip growth / harvest update logic
+            return
+    # ----- Real-time growth with per-crop timing -----
+        now = pygame.time.get_ticks()
+        delta_ms = now - self.last_growth_time
+        self.last_growth_time = now
+
+    # convert to seconds
+        delta_seconds = delta_ms / 1000.0
+
+        if delta_seconds > 0:
+            from game_logic import realtime_growth_step
+            self.state = realtime_growth_step(self.state,
+                                          self.plot_growth_timers,
+                                          delta_seconds)
+
+    # ----- Harvest key (H) as before -----
         keys = pygame.key.get_pressed()
         if keys[pygame.K_h] and not self.in_shop:
             mouse_pos = pygame.mouse.get_pos()
@@ -150,9 +181,41 @@ class FarmSimulator:
                 # Update unlocks after harvest
                 self.state = update_unlocks(self.state)
                 self.renderer.show_message(msg)
-                # Small delay to prevent multiple harvests
                 pygame.time.wait(200)
+
     
+    def growth_event(self, msg: str):
+        self.renderer.show_message(msg)
+    
+    def weather_event(self, event_type: str):
+        if event_type == "rain":
+            self.state = apply_rain_effect(self.state)
+            self.renderer.show_message("Rain event: all crops watered!")
+
+    async def run_async(self):
+        # start background tasks
+        import asyncio
+        self.g_manager.running = True
+        self.w_manager.running = True
+        loop = asyncio.get_running_loop()
+        self.g_manager.growth_task = loop.create_task(self.g_manager.growth_loop())
+        self.w_manager.weather_task = loop.create_task(self.w_manager.weather_loop())
+
+        while self.running:
+            self.handle_events()
+            self.update()
+            self.render()
+            await asyncio.sleep(0)  # give control back to event loop
+
+        # stop background tasks
+        self.g_manager.stop()
+        self.w_manager.stop()
+        print("Saving game...")
+        save_game(self.state)
+
+        # ✅ CLEANUP PYGAME
+        pygame.quit()
+
     def render(self):
         """Render the game"""
         if not self.in_shop:
@@ -202,8 +265,7 @@ def main():
     print("█" * 70 + "\n")
     
     game = FarmSimulator()
-    game.run()
-
+    asyncio.run(game.run_async())
 
 if __name__ == "__main__":
     main()

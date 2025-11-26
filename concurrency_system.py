@@ -84,14 +84,14 @@ class WeatherSystem:
         
         while self.running:
             # Wait 1-3 minutes between weather checks
-            wait_time = random.uniform(60, 180)
+            wait_time = random.uniform(80, 200)
             await asyncio.sleep(wait_time)
             
             if not self.running:
                 break
             
             # 20% chance of rain
-            if random.random() < 0.2:
+            if random.random() < 0.8:
                 self.weather_callback("rain")
     
     def start(self):
