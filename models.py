@@ -3,8 +3,15 @@ Data models for Farm Simulator game using dataclasses.
 Demonstrates functional programming with immutable data structures.
 """
 from dataclasses import dataclass, field, replace
-from typing import Optional, Dict, Tuple
-from enum import Enum
+from typing import Optional, Dict, Tuple, List
+from enum import Enum, auto
+
+
+class Season(Enum):
+    SPRING = "Spring"
+    SUMMER = "Summer"
+    AUTUMN = "Autumn"
+    WINTER = "Winter"
 
 
 class CropType(Enum):
@@ -40,14 +47,15 @@ class CropInfo:
     harvest_value: int
     time_per_stage: float
     unlocked: bool = True
+    preferred_seasons: List[Season] = field(default_factory=list)
 
 
 # Crop database
 CROP_DATABASE: Dict[CropType, CropInfo] = {
-    CropType.WHEAT: CropInfo("Wheat", 3, 5, 15, 30.0, True),
-    CropType.CARROT: CropInfo("Carrot", 4, 10, 25, 60.0, False),  # Unlockable
-    CropType.TOMATO: CropInfo("Tomato", 5, 15, 40, 80.0, False),  # Unlockable
-    CropType.CORN: CropInfo("Corn", 6, 20, 60, 100.0, False),      # Unlockable
+    CropType.WHEAT: CropInfo("Wheat", 3, 5, 15, 30.0, True, [Season.SPRING, Season.AUTUMN]),
+    CropType.CARROT: CropInfo("Carrot", 4, 10, 25, 60.0, False, [Season.SPRING, Season.WINTER]),
+    CropType.TOMATO: CropInfo("Tomato", 5, 15, 40, 80.0, False, [Season.SUMMER, Season.AUTUMN]),
+    CropType.CORN: CropInfo("Corn", 6, 20, 60, 100.0, False, [Season.SUMMER, Season.AUTUMN]),
 }
 
 
@@ -119,6 +127,11 @@ class GameState:
     selected_tool: Tool = Tool.PLANT
     farm_size: int = 10  # Grid size (10x10)
     unlocked_area: int = 5  # Starting usable area (5x5)
+    season: Season = Season.SPRING
+    energy: int = 100
+    max_energy: int = 100
+    time: float = 6.0  # Start at 6:00 AM
+    show_help: bool = False
 
     @staticmethod
     def create_initial_state(farm_size: int = 10, unlocked_area: int = 5) -> 'GameState':

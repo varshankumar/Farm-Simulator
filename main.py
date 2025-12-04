@@ -5,10 +5,12 @@ Integrates all systems: rendering, input, game logic, and paradigms.
 import pygame
 import sys
 import asyncio
+from dataclasses import replace
 from models import GameState, Tool, CropType
 from game_logic import (
     plant_seed, water_crop, harvest_crop, advance_day, 
-    buy_seeds, toggle_crop_selection, natural_growth_tick
+    buy_seeds, toggle_crop_selection, natural_growth_tick, realtime_growth_step,
+    toggle_help
 )
 from renderer import Renderer
 from save_system import save_game, load_game, save_exists
@@ -40,19 +42,34 @@ class FarmSimulator:
             self.state = GameState.create_initial_state()
             self.renderer.show_message("Welcome to Farm Simulator!")
     
-    def run(self):
-        """Main game loop"""
+    async def run_async(self):
+        """Main game loop (Async)"""
+        # start background tasks
+        self.g_manager.running = True
+        self.w_manager.running = True
+        loop = asyncio.get_running_loop()
+        self.g_manager.growth_task = loop.create_task(self.g_manager.growth_loop())
+        self.w_manager.weather_task = loop.create_task(self.w_manager.weather_loop())
+
         while self.running:
             self.handle_events()
             self.update()
             self.render()
-            self.clock.tick(60)  # 60 FPS
-        
-        # Save on exit
+            await asyncio.sleep(0)  # give control back to event loop
+
+        # stop background tasks
+        self.g_manager.stop()
+        self.w_manager.stop()
         print("Saving game...")
         save_game(self.state)
+
+        # ✅ CLEANUP PYGAME
         pygame.quit()
         sys.exit()
+
+    def run(self):
+        """Legacy run method - redirects to async"""
+        asyncio.run(self.run_async())
     
     def handle_events(self):
         """Handle input events"""
@@ -60,11 +77,21 @@ class FarmSimulator:
             if event.type == pygame.QUIT:
                 self.running = False
             
-            elif event.type == pygame.KEYDOWN:
+            # Handle help overlay
+            if self.state.show_help:
+                if event.type == pygame.KEYDOWN or event.type == pygame.MOUSEBUTTONDOWN:
+                    self.state = toggle_help(self.state)
+                continue
+            
+            if event.type == pygame.KEYDOWN:
                 self.handle_keypress(event.key)
             
             elif event.type == pygame.MOUSEBUTTONDOWN and not self.in_shop:
-                self.handle_mouse_click(event.button, event.pos)
+                # Check for help button click
+                if self.renderer.is_help_button_clicked(event.pos):
+                    self.state = toggle_help(self.state)
+                else:
+                    self.handle_mouse_click(event.button, event.pos)
     
     def handle_keypress(self, key: int):
         """Handle keyboard input"""
@@ -121,16 +148,36 @@ class FarmSimulator:
         x, y = hovered_plot
         
         if button == 1:  # Left click - Plant
+            old_coins = self.state.inventory.coins
             self.state, msg = plant_seed(self.state, x, y)
             self.renderer.show_message(msg)
+            
+            # Visual feedback
+            if "Planted" in msg:
+                self.renderer.add_floating_text("-5 Energy", pos, (255, 0, 0))
         
         elif button == 3:  # Right click - Water
             self.state, msg = water_crop(self.state, x, y)
             self.renderer.show_message(msg)
+            
+            if "watered" in msg and "already" not in msg:
+                self.renderer.add_floating_text("-2 Energy", pos, (100, 100, 255))
     
     def handle_harvest_key(self, x: int, y: int):
         """Handle harvest action"""
+        old_coins = self.state.inventory.coins
         self.state, msg = harvest_crop(self.state, x, y)
+        
+        # Calculate coin gain
+        coin_gain = self.state.inventory.coins - old_coins
+        if coin_gain > 0:
+            # Convert grid pos to screen pos for floating text
+            # This is a bit hacky, ideally renderer handles this conversion
+            # But for now we'll just use mouse pos if available or approximate
+            mouse_pos = pygame.mouse.get_pos()
+            self.renderer.add_floating_text(f"+{coin_gain} Coins!", mouse_pos, (255, 215, 0))
+            self.renderer.add_floating_text("-3 Energy", (mouse_pos[0], mouse_pos[1] - 20), (255, 0, 0))
+
         # Update unlocks after harvest
         self.state = update_unlocks(self.state)
         self.renderer.show_message(msg)
@@ -164,6 +211,19 @@ class FarmSimulator:
     # convert to seconds
         delta_seconds = delta_ms / 1000.0
 
+        # Advance game time (1 real second = 10 game minutes)
+        # 10 game minutes = 10/60 hours = 1/6 hours
+        # So 1 real second = 0.166 game hours
+        game_hours_passed = delta_seconds * 0.5  # Speed up: 1 real sec = 30 game mins
+        new_time = self.state.time + game_hours_passed
+        
+        if new_time >= 22.0:  # 10 PM mandatory sleep
+            self.state, msg = advance_day(self.state)
+            self.state = update_unlocks(self.state)
+            self.renderer.show_message("It's late! You fell asleep. " + msg)
+        else:
+            self.state = replace(self.state, time=new_time)
+
         if delta_seconds > 0:
             from game_logic import realtime_growth_step
             self.state = realtime_growth_step(self.state,
@@ -177,11 +237,12 @@ class FarmSimulator:
             hovered_plot = self.renderer._get_plot_from_mouse(self.state, mouse_pos)
             if hovered_plot:
                 x, y = hovered_plot
-                self.state, msg = harvest_crop(self.state, x, y)
-                # Update unlocks after harvest
-                self.state = update_unlocks(self.state)
-                self.renderer.show_message(msg)
-                pygame.time.wait(200)
+                # Only harvest if we haven't just harvested (simple debounce)
+                # Ideally we check if there's a mature crop first to avoid spamming
+                plot = self.state.farm.get((x, y))
+                if plot and plot.has_mature_crop():
+                    self.handle_harvest_key(x, y)
+                    pygame.time.wait(200)
 
     
     def growth_event(self, msg: str):
@@ -191,30 +252,6 @@ class FarmSimulator:
         if event_type == "rain":
             self.state = apply_rain_effect(self.state)
             self.renderer.show_message("Rain event: all crops watered!")
-
-    async def run_async(self):
-        # start background tasks
-        import asyncio
-        self.g_manager.running = True
-        self.w_manager.running = True
-        loop = asyncio.get_running_loop()
-        self.g_manager.growth_task = loop.create_task(self.g_manager.growth_loop())
-        self.w_manager.weather_task = loop.create_task(self.w_manager.weather_loop())
-
-        while self.running:
-            self.handle_events()
-            self.update()
-            self.render()
-            await asyncio.sleep(0)  # give control back to event loop
-
-        # stop background tasks
-        self.g_manager.stop()
-        self.w_manager.stop()
-        print("Saving game...")
-        save_game(self.state)
-
-        # ✅ CLEANUP PYGAME
-        pygame.quit()
 
     def render(self):
         """Render the game"""

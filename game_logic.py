@@ -38,6 +38,15 @@ def plant_seed(state: GameState, x: int, y: int) -> Tuple[GameState, str]:
     if not state.inventory.has_seeds(crop_type):
         return state, f"No {crop_info.name} seeds available!"
     
+    # Check energy
+    if state.energy < 5:
+        return state, "Not enough energy! (Need 5)"
+
+    # Check season
+    if crop_info.preferred_seasons and state.season not in crop_info.preferred_seasons:
+        seasons_str = " or ".join(s.value for s in crop_info.preferred_seasons)
+        return state, f"{crop_info.name} only grows in {seasons_str}!"
+
     # Create new crop
     new_crop = Crop(crop_type=crop_type)
     
@@ -51,7 +60,7 @@ def plant_seed(state: GameState, x: int, y: int) -> Tuple[GameState, str]:
     new_inventory = replace(state.inventory, seeds=new_seeds)
     
     # Return new state
-    new_state = replace(state, farm=new_farm, inventory=new_inventory)
+    new_state = replace(state, farm=new_farm, inventory=new_inventory, energy=state.energy - 5)
     return new_state, f"Planted {crop_info.name}!"
 
 
@@ -78,12 +87,16 @@ def water_crop(state: GameState, x: int, y: int) -> Tuple[GameState, str]:
     if crop.watered:
         return state, "Crop already watered today!"
     
+    # Check energy
+    if state.energy < 2:
+        return state, "Not enough energy! (Need 2)"
+
     # Update crop to be watered
     new_crop = replace(crop, watered=True)
     new_plot = replace(plot, crop=new_crop)
     new_farm = {**state.farm, (x, y): new_plot}
     
-    new_state = replace(state, farm=new_farm)
+    new_state = replace(state, farm=new_farm, energy=state.energy - 2)
     return new_state, "Crop watered!"
 
 
@@ -110,6 +123,10 @@ def harvest_crop(state: GameState, x: int, y: int) -> Tuple[GameState, str]:
     if crop is None:
         return state, "No crop to harvest!"
     
+    # Check energy
+    if state.energy < 3:
+        return state, "Not enough energy! (Need 3)"
+
     crop_type = crop.crop_type
     crop_info = CROP_DATABASE[crop_type]
     
@@ -134,7 +151,7 @@ def harvest_crop(state: GameState, x: int, y: int) -> Tuple[GameState, str]:
         crops_harvested=new_crops_harvested
     )
     
-    new_state = replace(state, farm=new_farm, inventory=new_inventory, stats=new_stats)
+    new_state = replace(state, farm=new_farm, inventory=new_inventory, stats=new_stats, energy=state.energy - 3)
     return new_state, f"Harvested {crop_info.name} for {crop_info.harvest_value} coins!"
 
 
@@ -145,6 +162,7 @@ def advance_day(state: GameState) -> Tuple[GameState, str]:
     
     Returns: (new_state, message)
     """
+    from models import Season
     new_farm = {}
     
     for pos, plot in state.farm.items():
@@ -167,14 +185,30 @@ def advance_day(state: GameState) -> Tuple[GameState, str]:
             new_farm[pos] = new_plot
     
     new_stats = replace(state.stats, days_played=state.stats.days_played + 1)
+    
+    # Advance season every 10 days
+    new_day = state.current_day + 1
+    new_season = state.season
+    if new_day % 10 == 1:
+        seasons = list(Season)
+        current_idx = seasons.index(state.season)
+        new_season = seasons[(current_idx + 1) % len(seasons)]
+
+    # Increase max energy significantly each day to represent growing stamina
+    new_max_energy = state.max_energy + 50
+
     new_state = replace(
         state,
         farm=new_farm,
-        current_day=state.current_day + 1,
-        stats=new_stats
+        current_day=new_day,
+        stats=new_stats,
+        max_energy=new_max_energy,
+        energy=new_max_energy, # Restore to new max energy
+        season=new_season,
+        time=6.0  # Reset time to 6:00 AM
     )
     
-    return new_state, f"Day {new_state.current_day} begins!"
+    return new_state, f"Day {new_state.current_day} begins! Max Energy increased to {new_max_energy}!"
 
 
 def buy_seeds(state: GameState, crop_type: CropType, quantity: int = 1) -> Tuple[GameState, str]:
@@ -323,3 +357,8 @@ def get_plot_status(plot: Plot) -> str:
         total = crop_info.growth_stages
         water_status = "💧" if crop.watered else "❌"
         return f"{crop_info.name} ({progress}/{total}) {water_status}"
+
+
+def toggle_help(state: GameState) -> GameState:
+    """Toggle the help menu visibility"""
+    return replace(state, show_help=not state.show_help)
