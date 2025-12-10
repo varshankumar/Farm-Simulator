@@ -40,7 +40,7 @@ class FarmSimulator:
         else:
             print("Starting new game...")
             self.state = GameState.create_initial_state()
-            self.renderer.show_message("Welcome to Farm Simulator!")
+            self.renderer.show_message("Welcome to Little Roots")
     
     async def run_async(self):
         """Main game loop (Async)"""
@@ -214,7 +214,7 @@ class FarmSimulator:
         # Advance game time (1 real second = 10 game minutes)
         # 10 game minutes = 10/60 hours = 1/6 hours
         # So 1 real second = 0.166 game hours
-        game_hours_passed = delta_seconds * 0.5  # Speed up: 1 real sec = 30 game mins
+        game_hours_passed = delta_seconds * 0.2  #80secs
         new_time = self.state.time + game_hours_passed
         
         if new_time >= 22.0:  # 10 PM mandatory sleep

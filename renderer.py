@@ -63,7 +63,7 @@ class Renderer:
         self.screen_width = screen_width
         self.screen_height = screen_height
         self.screen = pygame.display.set_mode((screen_width, screen_height))
-        pygame.display.set_caption("Farm Simulator")
+        pygame.display.set_caption("Little Roots")
         
         # Layout configuration
         self.hud_height = 150
@@ -343,69 +343,94 @@ class Renderer:
             pygame.draw.circle(self.screen, COLOR_WATERED, center, 5)
     
     def _render_hud(self, state: GameState):
-        """Render the HUD at the top of the screen"""
-        # Create semi-transparent background
+    # Create semi-transparent background
         hud_surface = pygame.Surface((self.screen_width, self.hud_height))
         hud_surface.set_alpha(200)
         hud_surface.fill((40, 40, 40))
         self.screen.blit(hud_surface, (0, 0))
-        
-        # Render day and coins
+    
+    # Render day and coins
         day_text = self.font_large.render(f"Day {state.current_day} ({state.season.value})", True, COLOR_TEXT)
-        
-        # Format time (e.g., 6.5 -> 06:30)
+    
+    # Format time (e.g., 6.5 -> 06:30)
         hours = int(state.time)
         minutes = int((state.time - hours) * 60)
         time_str = f"{hours:02d}:{minutes:02d}"
-        time_text = self.font_large.render(f"🕒 {time_str}", True, COLOR_TEXT)
-        
-        coins_text = self.font_large.render(f"💰 {state.inventory.coins} coins", True, COLOR_TEXT)
-        
+    # drop emoji if it doesn't render: just show text
+        time_text = self.font_large.render(f"{time_str}", True, COLOR_TEXT)
+    
+        coins_text = self.font_large.render(f"{state.inventory.coins} coins", True, COLOR_TEXT)
+    
         self.screen.blit(day_text, (20, 20))
         self.screen.blit(time_text, (280, 20))
         self.screen.blit(coins_text, (20, 60))
-        
-        # Render Energy Bar
+    
+    # ---------- Energy Bar ----------
         energy_ratio = state.energy / state.max_energy
         bar_width = 200
         bar_height = 20
         bar_x = 700
         bar_y = 30
-        
-        # Background
+    
+    # Background
         pygame.draw.rect(self.screen, (100, 100, 100), (bar_x, bar_y, bar_width, bar_height))
-        # Fill
+    # Fill
         fill_width = int(bar_width * energy_ratio)
         color = (0, 255, 0) if energy_ratio > 0.3 else (255, 0, 0)
         pygame.draw.rect(self.screen, color, (bar_x, bar_y, fill_width, bar_height))
-        # Border
+    # Border
         pygame.draw.rect(self.screen, (255, 255, 255), (bar_x, bar_y, bar_width, bar_height), 2)
-        
+    
         energy_text = self.font_small.render(f"Energy: {state.energy}/{state.max_energy}", True, COLOR_TEXT)
         self.screen.blit(energy_text, (bar_x, bar_y - 20))
-        
-        # Render selected crop
+
+    # ---------- Day Progress Bar (under the energy bar) ----------
+        day_start = 6.0
+        day_end = 22.0
+        day_span = day_end - day_start
+        t = max(day_start, min(state.time, day_end))
+        ratio = (t - day_start) / day_span
+
+        dbar_width = 200
+        dbar_height = 10
+        dbar_x = bar_x
+    # put it a bit below the energy bar
+        dbar_y = bar_y + bar_height + 25   # 30 + 20 + 25 = 75
+
+    # Label just above the day bar
+        day_label = self.font_small.render("Day Progress", True, COLOR_TEXT)
+        self.screen.blit(day_label, (dbar_x, dbar_y - 18))
+
+    # Background
+        pygame.draw.rect(self.screen, (80, 80, 80), (dbar_x, dbar_y, dbar_width, dbar_height))
+    # Fill
+        d_fill_width = int(dbar_width * ratio)
+        pygame.draw.rect(self.screen, (255, 215, 0), (dbar_x, dbar_y, d_fill_width, dbar_height))
+    # Border
+        pygame.draw.rect(self.screen, (255, 255, 255), (dbar_x, dbar_y, dbar_width, dbar_height), 1)
+
+    # ---------- Selected crop ----------
         crop_info = CROP_DATABASE[state.selected_crop]
-        
         season_str = "/".join(s.value for s in crop_info.preferred_seasons) if crop_info.preferred_seasons else "All"
         is_good_season = state.season in crop_info.preferred_seasons if crop_info.preferred_seasons else True
         color = COLOR_TEXT if is_good_season else (255, 100, 100)
-        
+    
         selected_text = self.font_medium.render(f"Selected: {crop_info.name} ({season_str})", True, color)
         seeds_text = self.font_small.render(
             f"Seeds: {state.inventory.seeds.get(state.selected_crop, 0)}", 
             True, COLOR_TEXT
         )
-        
+    
         self.screen.blit(selected_text, (280, 60))
         self.screen.blit(seeds_text, (280, 85))
-        
-        # Render controls hint
+    
+    # ---------- Controls hint ----------
         controls = self.font_small.render(
             "LClick: Plant | RClick: Water | H: Harvest | N: Next Day | S: Shop | Tab: Change Crop",
             True, COLOR_TEXT
         )
         self.screen.blit(controls, (20, 110))
+
     
     def _render_sidebar(self, state: GameState, hovered_plot: Optional[Tuple[int, int]]):
         """Render the sidebar with plot info and stats"""
@@ -602,7 +627,7 @@ class Renderer:
         pygame.draw.rect(self.screen, COLOR_HELP_BORDER, box_rect, 3, border_radius=10)
         
         # Title
-        title = self.font_large.render("Farm Simulator - Help & Rules", True, COLOR_HELP_BORDER)
+        title = self.font_large.render("Little Roots - Help & Rules", True, COLOR_HELP_BORDER)
         title_rect = title.get_rect(center=(self.screen_width // 2, box_y + 40))
         self.screen.blit(title, title_rect)
         
